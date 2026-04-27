@@ -1,16 +1,18 @@
 from agents.intake_agent import CallIntakeAgent
+from agents.transcription_agent import TranscriptionAgent
 
 if __name__ == "__main__":
-    agent = CallIntakeAgent()
 
-    # Test JSON input
-    input_data = {
-        "transcript": "Agent: Hello. Customer: My internet is not working.",
-        "agent_name": "Sarah",
-        "customer_id": "C123",
-        "duration_seconds": 120
-    }
+    intake = CallIntakeAgent()
+    transcription = TranscriptionAgent()
 
-    result = agent.run(input_data)
+    # Test audio input
+    input_audio = "data/sample_audio/sample.mp3"
 
-    print(result.model_dump())
+    record = intake.run(input_audio)
+    record = transcription.run(record)
+
+    if isinstance(record, dict):
+        print(record)
+    else:
+        print(record.model_dump())
