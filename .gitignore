@@ -45,6 +45,7 @@ logs/
 # Vector DB / embeddings
 chroma/
 chroma_db/
+chroma_cache/
 *.sqlite
 
 # Model cache / downloads

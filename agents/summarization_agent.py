@@ -32,7 +32,7 @@ class SummarizationAgent(BaseAgent):
 
 
         # Check cache first
-        query = record.raw_transcript.strip().lower()
+        query = " ".join(record.raw_transcript.strip().lower().split())
         cached = get_from_cache(query)
 
         if cached:
@@ -112,6 +112,7 @@ class SummarizationAgent(BaseAgent):
         record.status = CallStatus.SUMMARIZED
 
         # Store result in cache
+        logger.info("Storing response in cache")
         store_in_cache(query, {
             "summary": record.summary,
             "key_points": record.key_points,

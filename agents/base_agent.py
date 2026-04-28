@@ -61,7 +61,7 @@ class BaseAgent(ABC):
         # fallback only if no record exists
         return CallRecord(
             call_id="error",
-            input_type="unknown",  
+            input_type="audio",  
             status=CallStatus.FAILED,
             error=str(error)
         )

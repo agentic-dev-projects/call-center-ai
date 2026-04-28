@@ -2,56 +2,63 @@
 Semantic Cache using ChromaDB
 """
 
-import chromadb
+import hashlib
 import json
 from sentence_transformers import SentenceTransformer
 
-from chromadb.config import Settings
+from db.chroma_client import client
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
-client = chromadb.Client(
-    Settings(
-        persist_directory="./chroma_cache",
-        anonymized_telemetry=False
-    )
+# cosine space: ChromaDB returns (1 - cosine_similarity) as distance,
+# so similarity = 1 - distance is exact (no approximation needed).
+collection = client.get_or_create_collection(
+    name="semantic_cache",
+    metadata={"hnsw:space": "cosine"}
 )
-collection = client.get_or_create_collection(name="semantic_cache")
 
 
 def get_embedding(text: str):
     return model.encode(text).tolist()
 
+def generate_id(text):
+    return hashlib.md5(text.encode()).hexdigest()
 
-def get_from_cache(query: str, threshold: float = 0.85):
+def get_from_cache(query: str, similarity_threshold: float = 0.85):
+    query_embedding = get_embedding(query)
+
     results = collection.query(
-        query_embeddings=[get_embedding(query)],
-        n_results=1
+        query_embeddings=[query_embedding],
+        n_results=1,
+        include=["metadatas", "distances"]
     )
 
-    # ✅ SAFE GUARDS
-    if not results or "documents" not in results:
+    if not results or not results.get("ids") or not results["ids"][0]:
+        print("❌ CACHE MISS (empty collection)")
         return None
 
-    if not results["documents"] or not results["documents"][0]:
+    # With cosine space: distance = 1 - cosine_similarity, so similarity = 1 - distance
+    distance = results["distances"][0][0]
+    similarity = 1.0 - distance
+
+    print(f"Closest match similarity: {similarity:.4f}")
+
+    if similarity < similarity_threshold:
+        print(f"❌ CACHE MISS (similarity {similarity:.4f} < threshold {similarity_threshold})")
         return None
 
-    if not results["distances"] or not results["distances"][0]:
-        return None
-
-    score = results["distances"][0][0]
-
-    if score < (1 - threshold):
-        return json.loads(results["metadatas"][0][0]["response"])
-
-    return None
+    print(f"🚀 CACHE HIT (similarity: {similarity:.4f})")
+    return json.loads(results["metadatas"][0][0]["response"])
 
 
 def store_in_cache(query: str, response: dict):
-    collection.add(
-        ids=[query],
+    cache_id = generate_id(query)
+    embedding = get_embedding(query)
+
+    # upsert instead of add — prevents DuplicateIDError if same query is cached twice
+    collection.upsert(
+        ids=[cache_id],
+        embeddings=[embedding],
         documents=[query],
-        embeddings=[get_embedding(query)],
         metadatas=[{"response": json.dumps(response)}]
     )
-    client.persist()

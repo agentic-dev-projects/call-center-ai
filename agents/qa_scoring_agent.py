@@ -39,20 +39,20 @@ class QAScoringAgent(BaseAgent):
 
         # Prompt
         prompt = f"""
-Evaluate the following customer support call transcript:
+                    Evaluate the following customer support call transcript:
 
-{record.raw_transcript}
+                    {record.raw_transcript}
 
-Score each category from 1 to 5:
-- empathy
-- resolution
-- tone
-- professionalism
+                    Score each category from 1 to 5:
+                    - empathy
+                    - resolution
+                    - tone
+                    - professionalism
 
-Also compute overall_score as average.
+                    Also compute overall_score as average.
 
-Return ONLY structured JSON.
-"""
+                    Return ONLY structured JSON.
+                    """
 
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
