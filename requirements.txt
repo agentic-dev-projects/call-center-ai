@@ -4,3 +4,4 @@ loguru
 openai
 chromadb
 sentence-transformers
+langgraph
