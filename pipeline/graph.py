@@ -1,7 +1,7 @@
 """
 LangGraph Pipeline
 """
-
+from utils.logger import logger 
 from langgraph.graph import StateGraph, END
 
 from pipeline.state import PipelineState
@@ -71,6 +71,7 @@ def build_graph():
 
     def router_node(state: PipelineState):
         next_step = router.run(state["record"])
+        logger.info(f"Routing decision: {next_step}")
         return {"next": next_step}
 
     graph.add_node("router", router_node)

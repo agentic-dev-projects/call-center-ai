@@ -12,4 +12,11 @@ def retrieve(query: str, top_k: int = 3):
         n_results=top_k
     )
 
+    # ✅ FIX
+    if not results or "documents" not in results:
+        return []
+
+    if not results["documents"] or not results["documents"][0]:
+        return []
+
     return results["documents"][0]

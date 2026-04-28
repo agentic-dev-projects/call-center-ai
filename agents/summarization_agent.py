@@ -17,6 +17,8 @@ from rag.retriever import retrieve
 
 from utils.logger import logger
 
+from cache.semantic_cache import get_from_cache, store_in_cache
+
 
 class SummarizationAgent(BaseAgent):
     def __init__(self):
@@ -29,6 +31,18 @@ class SummarizationAgent(BaseAgent):
             raise ValueError("Transcript missing")
 
 
+        # Check cache first
+        query = record.raw_transcript.strip().lower()
+        cached = get_from_cache(query)
+
+        if cached:
+            logger.info("CACHE HIT - skipping LLM call")
+            record.summary = cached.get("summary")
+            record.key_points = cached.get("key_points")
+            record.action_items = cached.get("action_items")
+            record.status = CallStatus.SUMMARIZED
+            return record
+        
         # ----------------------------
         # RAG PIPELINE
         # ----------------------------
@@ -40,10 +54,14 @@ class SummarizationAgent(BaseAgent):
         store_chunks(record.call_id, chunks)
 
         # Step 3: retrieve relevant chunks
-        relevant_chunks = retrieve("customer issue and resolution")
+        relevant_chunks = retrieve(record.raw_transcript)
 
         # Combine retrieved chunks
-        context = "\n".join(relevant_chunks)
+        if not relevant_chunks:
+            logger.warning("No relevant chunks found, using full transcript")
+            context = record.raw_transcript
+        else:
+            context = "\n".join(relevant_chunks)
 
         # ADD DEBUG PRINT HERE
         logger.info(f"Retrieved context: {context}")
@@ -51,6 +69,10 @@ class SummarizationAgent(BaseAgent):
         # Load prompt
         with open("config/prompts/summarization_v1.txt", "r") as f:
             prompt_template = f.read()
+        
+        formatted_template = prompt_template.format(
+            transcript=record.raw_transcript
+        )
         
         prompt = f"""
         Context:
@@ -60,10 +82,8 @@ class SummarizationAgent(BaseAgent):
         {record.raw_transcript}
 
         Instructions:
-        {prompt_template}
+        {formatted_template}
         """
-
-        prompt = prompt_template.format(transcript=record.raw_transcript)
 
         # Call LLM
         response = self.client.chat.completions.create(
@@ -90,5 +110,12 @@ class SummarizationAgent(BaseAgent):
         record.action_items = parsed.get("action_items")
 
         record.status = CallStatus.SUMMARIZED
+
+        # Store result in cache
+        store_in_cache(query, {
+            "summary": record.summary,
+            "key_points": record.key_points,
+            "action_items": record.action_items
+        })
 
         return record

@@ -13,19 +13,22 @@ class RoutingAgent(BaseAgent):
         super().__init__(name="RoutingAgent")
 
     def process(self, record: CallRecord) -> str:
-        """
-        Returns next step name (node key)
-        """
 
-        # ❗ Case 1: Failure anywhere
+        if not hasattr(record, "status"):
+            return "end"
+        # ❗ If failure
         if record.status == "failed":
             return "end"
 
-        # ❗ Case 2: Skip transcription if transcript already exists
+        # ✅ NEW: If transcript missing → transcribe
+        if not record.raw_transcript:
+            return "transcription"
+
+        # Skip transcription if already present
         if record.raw_transcript and record.input_type == "json_transcript":
             return "summarization"
 
-        # ❗ Case 3: After QA, decide escalation
+        # After QA → decide escalation
         if record.qa_scores:
             score = record.qa_scores.get("overall_score", 5)
 
@@ -34,10 +37,11 @@ class RoutingAgent(BaseAgent):
             else:
                 return "end"
 
-        # ❗ Default flow
+        # If transcript exists but no summary
         if record.raw_transcript and not record.summary:
             return "summarization"
 
+        # If summary exists but no QA
         if record.summary and not record.qa_scores:
             return "qa"
 

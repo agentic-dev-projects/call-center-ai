@@ -50,12 +50,18 @@ class BaseAgent(ABC):
         """
         pass
 
-    def handle_error(self, error: Exception):
-        """
-        Default error handling logic
-        """
-        return {
-            "status": "FAILED",
-            "error": str(error),
-            "agent": self.name
-        }
+    def handle_error(self, error: Exception, input_data=None):
+        from agents.schemas import CallRecord, CallStatus
+
+        if isinstance(input_data, CallRecord):
+            input_data.status = CallStatus.FAILED
+            input_data.error = str(error)
+            return input_data  # ✅ ALWAYS return CallRecord
+
+        # fallback only if no record exists
+        return CallRecord(
+            call_id="error",
+            input_type="unknown",  
+            status=CallStatus.FAILED,
+            error=str(error)
+        )
