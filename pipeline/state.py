@@ -6,5 +6,6 @@ from typing import TypedDict
 from agents.schemas import CallRecord
 
 
-class PipelineState(TypedDict):
+class PipelineState(TypedDict, total=False):
     record: CallRecord
+    next: str
