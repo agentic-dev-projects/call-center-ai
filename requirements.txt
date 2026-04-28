@@ -2,3 +2,5 @@ pydantic-settings
 python-dotenv
 loguru
 openai
+chromadb
+sentence-transformers

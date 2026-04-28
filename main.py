@@ -17,4 +17,4 @@ if __name__ == "__main__":
     if isinstance(record, dict):
         print(record)
     else:
-        print(record.model_dump())
+        print(record.model_dump(mode="json"))

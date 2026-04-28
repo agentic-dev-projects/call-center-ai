@@ -11,6 +11,12 @@ from agents.schemas import CallRecord, CallStatus
 from config.settings import settings
 from openai import OpenAI
 
+from rag.chunker import chunk_transcript
+from rag.vector_store import store_chunks
+from rag.retriever import retrieve
+
+from utils.logger import logger
+
 
 class SummarizationAgent(BaseAgent):
     def __init__(self):
@@ -22,9 +28,40 @@ class SummarizationAgent(BaseAgent):
         if not record.raw_transcript:
             raise ValueError("Transcript missing")
 
+
+        # ----------------------------
+        # RAG PIPELINE
+        # ----------------------------
+
+        # Step 1: chunk transcript
+        chunks = chunk_transcript(record.raw_transcript)
+
+        # Step 2: store chunks in vector DB
+        store_chunks(record.call_id, chunks)
+
+        # Step 3: retrieve relevant chunks
+        relevant_chunks = retrieve("customer issue and resolution")
+
+        # Combine retrieved chunks
+        context = "\n".join(relevant_chunks)
+
+        # ADD DEBUG PRINT HERE
+        logger.info(f"Retrieved context: {context}")
+
         # Load prompt
         with open("config/prompts/summarization_v1.txt", "r") as f:
             prompt_template = f.read()
+        
+        prompt = f"""
+        Context:
+        {context}
+
+        Full Transcript:
+        {record.raw_transcript}
+
+        Instructions:
+        {prompt_template}
+        """
 
         prompt = prompt_template.format(transcript=record.raw_transcript)
 
