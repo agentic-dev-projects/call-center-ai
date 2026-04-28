@@ -1,0 +1,17 @@
+You are an expert call center analyst.
+
+Given the following customer service call transcript:
+
+{transcript}
+
+Generate a structured response in JSON format with:
+
+1. summary (2-3 sentences)
+2. key_points (list of 3-5 bullet points)
+3. action_items (list of follow-up actions, if any)
+
+Rules:
+- Be concise
+- Do not hallucinate
+- Only use information present in transcript
+- Keep language professional
