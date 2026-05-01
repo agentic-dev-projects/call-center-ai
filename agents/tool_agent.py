@@ -40,7 +40,7 @@ Return JSON:
 """
 
         response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.TOOL_MODEL,
             messages=[
                 {"role": "system", "content": "You decide tool usage."},
                 {"role": "user", "content": prompt}

@@ -1,0 +1,5 @@
+# Dev-only dependencies — not needed in production
+pytest
+pytest-cov
+black
+mypy

@@ -3,16 +3,11 @@ Chunker: Splits transcript into meaningful chunks
 """
 
 from typing import List
+from config.settings import settings
 
 
-def chunk_transcript(transcript: str, max_lines: int = 4) -> List[str]:
-    """
-    Splits transcript into chunks based on lines (simple version)
-
-    Future improvement:
-    - Speaker-based chunking
-    - Semantic chunking
-    """
+def chunk_transcript(transcript: str, max_lines: int = None) -> List[str]:
+    max_lines = max_lines if max_lines is not None else settings.CHUNK_MAX_LINES
 
     lines = transcript.split(". ")
 

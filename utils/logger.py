@@ -4,5 +4,5 @@ logger.add(
     "logs/app.log",
     rotation="1 MB",
     level="INFO",
-    format="{time} | {level} | {message}"
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {name}:{line} | {message}"
 )

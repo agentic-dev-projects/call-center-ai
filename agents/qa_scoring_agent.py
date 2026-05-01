@@ -55,7 +55,7 @@ class QAScoringAgent(BaseAgent):
                     """
 
         response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.QA_MODEL,
             messages=[
                 {"role": "system", "content": "You are a strict QA evaluator."},
                 {"role": "user", "content": prompt}

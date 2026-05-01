@@ -28,13 +28,13 @@ class TranscriptionAgent(BaseAgent):
             raise ValueError("Audio path missing")
 
         # Step 1: preprocess audio
-        processed_path = "temp_processed.wav"
+        processed_path = settings.TEMP_AUDIO_PATH
         preprocess_audio(record.audio_path, processed_path)
 
         # Step 2: call Whisper API
         with open(processed_path, "rb") as audio_file:
             response = self.client.audio.transcriptions.create(
-                model="whisper-1",
+                model=settings.WHISPER_MODEL,
                 file=audio_file
             )
 

@@ -67,7 +67,7 @@ class SummarizationAgent(BaseAgent):
         logger.info(f"Retrieved context: {context}")
 
         # Load prompt
-        with open("config/prompts/summarization_v1.txt", "r") as f:
+        with open(f"{settings.PROMPTS_DIR}/summarization_v1.txt", "r") as f:
             prompt_template = f.read()
         
         formatted_template = prompt_template.format(
@@ -87,13 +87,13 @@ class SummarizationAgent(BaseAgent):
 
         # Call LLM
         response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.SUMMARIZATION_MODEL,
             messages=[
                 {"role": "system", "content": "You are a JSON-only response generator."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            response_format={"type": "json_object"}  
+            temperature=settings.SUMMARIZATION_TEMPERATURE,
+            response_format={"type": "json_object"}
         )
 
         content = response.choices[0].message.content
