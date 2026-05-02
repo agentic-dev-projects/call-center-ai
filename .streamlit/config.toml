@@ -1,0 +1,6 @@
+[server]
+# Disable file watcher to stop Streamlit from scanning the entire
+# transformers package on every reload — it throws hundreds of
+# ModuleNotFoundError: No module named 'torchvision' warnings for
+# vision models we don't use (SAM, SegFormer, Qwen2-VL, etc.)
+fileWatcherType = "none"

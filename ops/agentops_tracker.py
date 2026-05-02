@@ -56,10 +56,16 @@ _agentops_enabled = False
 
 def setup_agentops() -> bool:
     """
-    Initialise AgentOps SDK.
+    Initialise AgentOps SDK (0.3.x API).
 
     Call once at application startup (before any pipeline runs).
     Returns True if initialised, False if skipped (no API key).
+
+    LEARNING: AgentOps 0.4.x rewrote its internals to use OpenTelemetry
+    and introduced a 'NonRecordingSpan' bug in many environments. We pin
+    to 0.3.x which has a simpler, stable API:
+      - instrument_llm_calls=True  → auto-patches OpenAI client
+      - auto_start_session=False   → we manage session lifecycle manually
     """
     global _agentops_enabled
 
@@ -72,14 +78,15 @@ def setup_agentops() -> bool:
         agentops.init(
             api_key=settings.AGENTOPS_API_KEY,
             default_tags=["call-center-ai", settings.ENV],
-            auto_start_session=False,   # we control session lifecycle manually
+            instrument_llm_calls=True,
+            auto_start_session=True,   # start one session per app process
         )
         _agentops_enabled = True
         logger.info("AgentOps: initialised successfully")
         return True
 
     except ImportError:
-        logger.warning("AgentOps: package not installed — run: pip install agentops")
+        logger.warning("AgentOps: package not installed — run: pip install agentops==0.3.21")
         return False
     except Exception as exc:
         logger.warning(f"AgentOps: init failed — {exc}")

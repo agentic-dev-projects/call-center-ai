@@ -34,10 +34,10 @@ from typing import List
 
 from ragas import evaluate, EvaluationDataset, SingleTurnSample
 from ragas.metrics.collections import (
-    faithfulness,
-    answer_relevancy,
-    context_recall,
-    context_precision,
+    Faithfulness,
+    AnswerRelevancy,
+    ContextRecall,
+    ContextPrecision,
 )
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
@@ -85,7 +85,7 @@ def run_ragas(
 
     result = evaluate(
         dataset=dataset,
-        metrics=[faithfulness, answer_relevancy, context_recall, context_precision],
+        metrics=[Faithfulness(), AnswerRelevancy(), ContextRecall(), ContextPrecision()],
         llm=llm,
         embeddings=embeddings,
     )

@@ -93,12 +93,10 @@ def run_pipeline(input_data) -> dict:
     """
     Invokes the LangGraph pipeline and returns the result as a plain dict.
 
-    LEARNING: We convert the Pydantic CallRecord to a plain dict with
-    .model_dump(mode="json") before storing it in session_state.
-
-    Why? session_state serialises values to JSON between reruns.
-    Pydantic models contain Enum fields (InputType, CallStatus) which are
-    not JSON-serialisable by default. mode="json" converts them to strings.
+    LEARNING: AgentOps auto_start_session=True creates one session per app
+    process and captures all LLM calls globally via instrument_llm_calls=True.
+    We don't need a manual AgentOpsSession wrapper here — the active session
+    is already running and will record every OpenAI call inside graph.invoke().
     """
     graph = load_graph()
     state = {"record": input_data}
@@ -662,7 +660,73 @@ with tab_eval:
 A score of 1.0 is perfect; 0.0 is no overlap.
         """)
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # SECTION A — EVALUATE LIVE RESULT
+    # ───────────────────────────────────────────────────────────────────────
+    # LEARNING: The pre-annotated eval_dataset.json uses saved generated
+    # summaries. This section evaluates the ACTUAL latest pipeline output
+    # from session_state against a reference you write yourself.
+    # This is how you'd evaluate in production: run the pipeline, compare
+    # the output to a human-written gold standard.
+    # ═══════════════════════════════════════════════════════════════════════
     st.divider()
+    st.subheader("⚡ Evaluate Live Result")
+
+    live_result = st.session_state.result
+
+    if live_result is None:
+        st.info("No live result yet. Process a call in the **Upload & Process** tab first, then come back here.")
+    else:
+        generated = live_result.get("summary") or ""
+
+        st.markdown("**Generated summary** (from the last pipeline run):")
+        st.text_area(
+            label="generated_summary_display",
+            value=generated,
+            height=100,
+            disabled=True,
+            label_visibility="collapsed",
+        )
+
+        st.markdown("**Your reference summary** (write what an ideal summary should say):")
+        reference = st.text_area(
+            label="live_reference_input",
+            placeholder="e.g. Customer was double-charged $49.99 twice in October. Agent confirmed billing error, processed full $99.98 refund within 3–5 days, added $20 service credit, and flagged account for billing audit.",
+            height=100,
+            label_visibility="collapsed",
+            key="live_reference",
+        )
+
+        if st.button("▶️ Score Live Result", type="primary", disabled=not reference.strip()):
+            with st.spinner("Computing metrics..."):
+                from evaluation.metrics import evaluate_summary
+                live_scores = evaluate_summary(reference.strip(), generated)
+                st.session_state["live_eval_scores"] = live_scores
+
+        live_scores = st.session_state.get("live_eval_scores")
+        if live_scores:
+            tf1 = live_scores.get("token_f1", {})
+            rl  = live_scores.get("rouge_l",  {})
+            bs  = live_scores.get("bertscore",{})
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Token F1",   f"{tf1.get('f1', 0):.3f}", help="Lexical overlap")
+            c2.metric("ROUGE-L F1", f"{rl.get('f1',  0):.3f}", help="LCS overlap")
+
+            bs_f1 = bs.get("f1")
+            if bs_f1 is not None:
+                c3.metric("BERTScore F1", f"{bs_f1:.3f}", help="Semantic similarity")
+            else:
+                c3.metric("BERTScore F1", "N/A", help=bs.get("error", "Unavailable"))
+
+            st.caption("💡 Token F1 and ROUGE-L penalise paraphrasing. BERTScore is the most reliable indicator of semantic quality.")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # SECTION B — BATCH EVAL ON ANNOTATED DATASET
+    # ═══════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.subheader("📂 Batch Eval — Annotated Dataset")
+    st.caption("Evaluates all 4 samples in `data/eval_dataset.json` against their pre-written reference summaries.")
 
     # ── Run controls ──────────────────────────────────────────────────────
     col_offline, col_ragas, col_spacer = st.columns([1, 1, 2])
