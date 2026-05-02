@@ -27,16 +27,10 @@ import os
 from collections import Counter
 from typing import List
 
-# Force HuggingFace libraries to use the local cache only.
-# Without this, transformers + huggingface_hub attempt a version-check HTTP
-# call on every load — blocked by the corporate proxy with a 403.
-# The model must already be cached (run once on a non-proxied network first).
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-
 from rouge_score import rouge_scorer
 from bert_score import score as bert_score_fn
 
+from config.settings import settings  # ensures HF_HUB_OFFLINE is set globally
 from utils.logger import logger
 
 

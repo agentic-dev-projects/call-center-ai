@@ -6,6 +6,7 @@ chromadb
 sentence-transformers
 langgraph
 langchain
+langchain-openai
 streamlit
 plotly
 pandas
@@ -13,3 +14,4 @@ rouge-score
 bert-score
 ragas
 datasets
+agentops

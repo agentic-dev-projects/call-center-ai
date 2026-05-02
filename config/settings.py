@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
+import os
 
 
 class Settings(BaseSettings):
@@ -32,6 +33,14 @@ class Settings(BaseSettings):
     TEMP_AUDIO_PATH: str = "temp_processed.wav"
     PROMPTS_DIR: str = "config/prompts"
 
+    # ── LangSmith (optional — tracing disabled if key is absent) ─────────────
+    LANGCHAIN_API_KEY: str = ""
+    LANGCHAIN_PROJECT: str = "call-center-ai"
+    LANGCHAIN_TRACING_V2: str = "false"   # set to "true" in .env to enable
+
+    # ── AgentOps (optional — disabled if key is absent) ──────────────────────
+    AGENTOPS_API_KEY: str = ""
+
     model_config = ConfigDict(
         env_file=".env",
         extra="allow"
@@ -39,3 +48,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Force HuggingFace libraries to use local cache only.
+# SentenceTransformer and bert_score both try to reach huggingface.co on every
+# load to check for model updates — blocked by corporate proxy with 403.
+# setdefault means the user can still override with HF_HUB_OFFLINE=0 in shell.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
