@@ -9,3 +9,7 @@ langchain
 streamlit
 plotly
 pandas
+rouge-score
+bert-score
+ragas
+datasets

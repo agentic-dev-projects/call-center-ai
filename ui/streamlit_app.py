@@ -137,10 +137,11 @@ st.divider()
 # This means: never put an expensive computation directly inside a tab body.
 # Always guard with `if st.session_state.result is not None`.
 # ═════════════════════════════════════════════════════════════════════════════
-tab_upload, tab_review, tab_analytics = st.tabs([
+tab_upload, tab_review, tab_analytics, tab_eval = st.tabs([
     "📤  Upload & Process",
     "📋  Review Results",
     "📊  Analytics",
+    "🧪  Evaluation",
 ])
 
 
@@ -616,3 +617,220 @@ with tab_analytics:
                         f"💡 **Focus area:** `{weakest_dim.title()}` scored "
                         f"{weakest_val:.1f} / 5.0 — the lowest dimension for this call."
                     )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 4 — EVALUATION HARNESS
+# ─────────────────────────────────────────────────────────────────────────────
+# LEARNING: The evaluation tab runs our offline and LLM-based metrics against
+# a pre-annotated dataset (data/eval_dataset.json).
+#
+# Metrics recap:
+#   Token F1   — bag-of-words precision/recall/F1. Fast, no models needed.
+#   ROUGE-L    — Longest Common Subsequence overlap. Captures sentence order.
+#   BERTScore  — Contextual BERT embeddings. Handles synonyms and paraphrasing.
+#   RAGAS      — LLM-judged: faithfulness, answer_relevancy, context metrics.
+#
+# Why keep offline (F1, ROUGE, BERT) and LLM-based (RAGAS) separate?
+#   Offline metrics are deterministic, cheap, and fast — great for CI/CD.
+#   RAGAS uses LLM calls — slower and costs money. Run it on-demand.
+# ═════════════════════════════════════════════════════════════════════════════
+EVAL_RESULTS_PATH = PROJECT_ROOT / "data" / "eval_results.json"
+
+with tab_eval:
+    st.subheader("🧪 Evaluation Harness")
+    st.caption(
+        "Runs automated metrics on the pre-annotated `data/eval_dataset.json`. "
+        "Token F1, ROUGE-L, and BERTScore run offline. "
+        "RAGAS requires OpenAI API calls."
+    )
+
+    # ── Metric explanation expander ───────────────────────────────────────
+    with st.expander("📚 What do these metrics measure?", expanded=False):
+        st.markdown("""
+| Metric | Type | What it measures | Handles synonyms? |
+|---|---|---|---|
+| **Token F1** | Lexical | Bag-of-words precision/recall between reference and candidate | ❌ |
+| **ROUGE-L** | Lexical | Longest Common Subsequence overlap (respects word order) | ❌ |
+| **BERTScore** | Semantic | Cosine similarity of contextual BERT embeddings | ✅ |
+| **RAGAS Faithfulness** | LLM-judged | Fraction of answer claims supported by retrieved context | ✅ |
+| **RAGAS Answer Relevancy** | LLM-judged | How well the answer addresses the original question | ✅ |
+| **RAGAS Context Recall** | LLM-judged | How much of the reference answer is covered by retrieved context | ✅ |
+| **RAGAS Context Precision** | LLM-judged | What fraction of retrieved chunks were actually useful | ✅ |
+
+**F1 = 2 × (Precision × Recall) / (Precision + Recall)**
+A score of 1.0 is perfect; 0.0 is no overlap.
+        """)
+
+    st.divider()
+
+    # ── Run controls ──────────────────────────────────────────────────────
+    col_offline, col_ragas, col_spacer = st.columns([1, 1, 2])
+
+    with col_offline:
+        run_offline = st.button(
+            "▶️ Run Offline Metrics",
+            type="primary",
+            use_container_width=True,
+            help="Runs Token F1, ROUGE-L, BERTScore — no API calls needed",
+        )
+
+    with col_ragas:
+        run_with_ragas = st.button(
+            "🧠 Run + RAGAS",
+            use_container_width=True,
+            help="Runs all metrics including RAGAS (uses OpenAI API)",
+        )
+
+    # ── Execute evaluation ─────────────────────────────────────────────────
+    if run_offline or run_with_ragas:
+        skip_ragas = not run_with_ragas
+
+        with st.status(
+            "🔄 Running evaluation…" if skip_ragas else "🔄 Running evaluation + RAGAS…",
+            expanded=True,
+        ) as eval_status:
+            try:
+                from evaluation.run_eval import run_evaluation
+
+                st.write("📂 Loading eval_dataset.json …")
+                st.write("📐 Computing Token F1 …")
+                st.write("📐 Computing ROUGE-L …")
+                st.write("📐 Computing BERTScore (downloads ~250 MB on first run) …")
+                if not skip_ragas:
+                    st.write("🤖 Running RAGAS (LLM calls in progress) …")
+
+                eval_results = run_evaluation(skip_ragas=skip_ragas)
+
+                # Persist so we can re-display without re-running
+                st.session_state["eval_results"] = eval_results
+                eval_status.update(label="✅ Evaluation complete!", state="complete")
+
+            except Exception as exc:
+                eval_status.update(label=f"❌ Evaluation failed: {exc}", state="error")
+                st.error(f"**Error:** {exc}")
+
+    # ── Display stored results ─────────────────────────────────────────────
+    # LEARNING: We check session_state first so results survive tab switches.
+    # If no session_state entry, fall back to the saved JSON file from last run.
+    stored_results = st.session_state.get("eval_results")
+
+    if stored_results is None and EVAL_RESULTS_PATH.exists():
+        with open(EVAL_RESULTS_PATH) as f:
+            stored_results = json.load(f)
+        st.info("📂 Showing results from previous run (`data/eval_results.json`). Click a button above to re-run.")
+
+    if stored_results:
+        st.divider()
+        st.subheader("📊 Results by Sample")
+
+        # ── Per-sample metric cards ────────────────────────────────────────
+        for r in stored_results:
+            s = r["scores"]
+            tf1 = s.get("token_f1", {})
+            rl  = s.get("rouge_l", {})
+            bs  = s.get("bertscore", {})
+            rag = s.get("ragas", {})
+
+            with st.expander(f"**{r['id']}** — {r['scenario']}", expanded=True):
+                m1, m2, m3 = st.columns(3)
+
+                m1.metric(
+                    "Token F1",
+                    f"{tf1.get('f1', 0):.3f}",
+                    help="Bag-of-words F1. ≥ 0.5 is generally good.",
+                )
+                m2.metric(
+                    "ROUGE-L F1",
+                    f"{rl.get('f1', 0):.3f}",
+                    help="LCS-based overlap. ≥ 0.4 is generally good.",
+                )
+                bs_f1 = bs.get("f1")
+                if bs_f1 is not None:
+                    m3.metric(
+                        "BERTScore F1",
+                        f"{bs_f1:.3f}",
+                        help="Semantic similarity. ≥ 0.85 is generally good.",
+                    )
+                else:
+                    m3.metric("BERTScore F1", "N/A", help=bs.get("error", "Unavailable"))
+                    m3.caption("⚠️ Model download required")
+
+                if rag and "error" not in rag and any(v is not None for v in rag.values()):
+                    r1, r2, r3, r4 = st.columns(4)
+                    r1.metric("Faithfulness",     f"{rag.get('faithfulness', 0):.3f}")
+                    r2.metric("Answer Relevancy", f"{rag.get('answer_relevancy', 0):.3f}")
+                    r3.metric("Context Recall",   f"{rag.get('context_recall', 0):.3f}")
+                    r4.metric("Context Precision",f"{rag.get('context_precision', 0):.3f}")
+                elif not rag:
+                    st.caption("RAGAS: not run (use **Run + RAGAS** button)")
+                elif "error" in rag:
+                    st.warning(f"RAGAS error: {rag['error']}")
+
+        # ── Aggregate bar chart ────────────────────────────────────────────
+        st.divider()
+        st.subheader("📈 Aggregate Comparison — F1 Scores Across Samples")
+
+        labels = [r["id"] for r in stored_results]
+        tf1_vals  = [r["scores"].get("token_f1",  {}).get("f1") or 0 for r in stored_results]
+        rl_vals   = [r["scores"].get("rouge_l",   {}).get("f1") or 0 for r in stored_results]
+        bs_vals   = [r["scores"].get("bertscore", {}).get("f1") or 0 for r in stored_results]
+
+        # LEARNING: Grouped bar chart — three traces (one per metric), same x-axis.
+        # barmode="group" places bars side-by-side instead of stacking.
+        agg_fig = go.Figure(
+            data=[
+                go.Bar(name="Token F1",   x=labels, y=tf1_vals, marker_color="#636EFA"),
+                go.Bar(name="ROUGE-L F1", x=labels, y=rl_vals,  marker_color="#EF553B"),
+                go.Bar(name="BERTScore",  x=labels, y=bs_vals,  marker_color="#00CC96"),
+            ],
+            layout=go.Layout(
+                barmode="group",
+                yaxis=dict(range=[0, 1.0], title="F1 Score"),
+                xaxis=dict(title="Eval Sample"),
+                height=380,
+                margin=dict(t=30, b=50),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            ),
+        )
+        st.plotly_chart(agg_fig, use_container_width=True)
+
+        # ── Summary averages table ─────────────────────────────────────────
+        st.divider()
+        st.subheader("📋 Average Scores")
+
+        def _avg(vals):
+            valid = [v for v in vals if v is not None]
+            return round(sum(valid) / len(valid), 4) if valid else "N/A"
+
+        def _safe(d, key):
+            v = d.get(key)
+            return v if v is not None else None
+
+        avg_data = {
+            "Metric": ["Token F1", "ROUGE-L F1", "BERTScore F1"],
+            "Avg Precision": [
+                _avg([_safe(r["scores"].get("token_f1",  {}), "precision") for r in stored_results]),
+                _avg([_safe(r["scores"].get("rouge_l",   {}), "precision") for r in stored_results]),
+                _avg([_safe(r["scores"].get("bertscore", {}), "precision") for r in stored_results]),
+            ],
+            "Avg Recall": [
+                _avg([_safe(r["scores"].get("token_f1",  {}), "recall") for r in stored_results]),
+                _avg([_safe(r["scores"].get("rouge_l",   {}), "recall") for r in stored_results]),
+                _avg([_safe(r["scores"].get("bertscore", {}), "recall") for r in stored_results]),
+            ],
+            "Avg F1": [
+                _avg(tf1_vals),
+                _avg(rl_vals),
+                _avg([v if v > 0 else None for v in bs_vals]),
+            ],
+        }
+
+        # LEARNING: st.table() renders a static HTML table (no sorting/filtering).
+        # For interactive tables use st.dataframe(). We use st.table() here
+        # because the data is tiny and we don't need interactivity.
+        import pandas as pd
+        st.table(pd.DataFrame(avg_data).set_index("Metric"))
+
+    else:
+        st.info("Click **▶️ Run Offline Metrics** to evaluate the annotated dataset.")
