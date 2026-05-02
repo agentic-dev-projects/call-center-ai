@@ -36,11 +36,12 @@ class SummarizationAgent(BaseAgent):
         cached = get_from_cache(query)
 
         if cached:
-            logger.info("CACHE HIT - skipping LLM call")
+            logger.info("Cache HIT — skipping LLM call")
             record.summary = cached.get("summary")
             record.key_points = cached.get("key_points")
             record.action_items = cached.get("action_items")
             record.status = CallStatus.SUMMARIZED
+            record.from_cache = True
             return record
         
         # ----------------------------

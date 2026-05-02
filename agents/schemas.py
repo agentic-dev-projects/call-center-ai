@@ -4,7 +4,7 @@ Schemas for Call Center AI
 Defines structured data models used across agents.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional, List
 from enum import Enum
 import hashlib
@@ -48,6 +48,7 @@ class CallRecord(BaseModel):
     qa_scores: Optional[dict] = None
 
     error: Optional[str] = None
+    from_cache: bool = False     # True when summarization was served from semantic cache
 
 
 def generate_call_id(input_data: str) -> str:

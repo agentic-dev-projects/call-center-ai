@@ -6,3 +6,6 @@ chromadb
 sentence-transformers
 langgraph
 langchain
+streamlit
+plotly
+pandas

@@ -60,7 +60,12 @@ class CallIntakeAgent(BaseAgent):
         if not file_path.endswith((".mp3", ".wav", ".m4a")):
             raise IntakeValidationError("Unsupported audio format")
 
-        call_id = generate_call_id(file_path)
+        # Hash the file CONTENT, not the path.
+        # Temp file paths are random every run (/tmp/tmpABCDEF.mp3),
+        # so path-based IDs change every upload of the same audio file.
+        # Content-based IDs are stable: same audio bytes = same call_id.
+        with open(file_path, "rb") as f:
+            call_id = generate_call_id(f.read())
 
         return CallRecord(
             call_id=call_id,
