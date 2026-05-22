@@ -50,6 +50,10 @@ class CallRecord(BaseModel):
     error: Optional[str] = None
     from_cache: bool = False     # True when summarization was served from semantic cache
 
+    # Guardrail results (M17)
+    guardrail_violations: List[str] = []   # human-readable violation messages
+    guardrail_blocked: bool = False        # True if pipeline was halted by a guardrail
+
 
 def generate_call_id(input_data: str) -> str:
     """

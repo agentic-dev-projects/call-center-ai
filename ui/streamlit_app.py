@@ -135,11 +135,12 @@ st.divider()
 # This means: never put an expensive computation directly inside a tab body.
 # Always guard with `if st.session_state.result is not None`.
 # ═════════════════════════════════════════════════════════════════════════════
-tab_upload, tab_review, tab_analytics, tab_eval = st.tabs([
+tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails = st.tabs([
     "📤  Upload & Process",
     "📋  Review Results",
     "📊  Analytics",
     "🧪  Evaluation",
+    "🛡️  Guardrails",
 ])
 
 
@@ -312,19 +313,31 @@ with tab_upload:
 
                     # Build a human-readable log based on what actually ran
                     log = ["✅  IntakeAgent       — input validated"]
-                    if result.get("input_type") == "audio":
-                        log.append("✅  TranscriptionAgent — audio transcribed via Whisper")
-                    else:
-                        log.append("⏭️  TranscriptionAgent — skipped (JSON input)")
 
-                    if result.get("from_cache"):
-                        log.append("🚀  SummarizationAgent — CACHE HIT (LLM skipped)")
+                    if result.get("guardrail_blocked"):
+                        # Pipeline was halted after intake — nothing else ran
+                        log.append("🛡️  InputGuardrail    — BLOCKED (pipeline halted, no LLM called)")
                     else:
-                        log.append("✅  SummarizationAgent — summary generated via LLM")
+                        if result.get("input_type") == "audio":
+                            log.append("✅  TranscriptionAgent — audio transcribed via Whisper")
+                        else:
+                            log.append("⏭️  TranscriptionAgent — skipped (JSON input)")
 
-                    log.append("✅  QAScoringAgent    — quality scores computed")
+                        if result.get("from_cache"):
+                            log.append("🚀  SummarizationAgent — CACHE HIT (LLM skipped)")
+                        else:
+                            log.append("✅  SummarizationAgent — summary generated via LLM")
+
+                        log.append("✅  QAScoringAgent    — quality scores computed")
+
+                        violations = result.get("guardrail_violations") or []
+                        if violations:
+                            log.append(f"⚠️   OutputGuardrail   — {len(violations)} warning(s) flagged")
+                        else:
+                            log.append("✅  OutputGuardrail   — all checks passed")
+
                     if result.get("error"):
-                        log.append(f"⚠️   Error recorded: {result['error']}")
+                        log.append(f"⚠️   Error: {result['error']}")
 
                     st.session_state.pipeline_log = log
                     status.update(label="✅ Pipeline complete!", state="complete")
@@ -424,6 +437,15 @@ with tab_review:
         if result.get("error"):
             st.divider()
             st.error(f"⚠️ Pipeline recorded an error: `{result['error']}`")
+
+        # ── Guardrail banner ───────────────────────────────────────────────
+        violations = result.get("guardrail_violations") or []
+        if result.get("guardrail_blocked"):
+            st.divider()
+            st.error("🛡️ **Pipeline blocked by guardrail.** See the **Guardrails** tab for details.")
+        elif violations:
+            st.divider()
+            st.warning(f"🛡️ **{len(violations)} guardrail warning(s)** — pipeline completed but violations were flagged. See the **Guardrails** tab.")
 
         # ── Raw output expander ────────────────────────────────────────────
         # LEARNING: st.expander() hides verbose content behind a toggle.
@@ -898,3 +920,142 @@ A score of 1.0 is perfect; 0.0 is no overlap.
 
     else:
         st.info("Click **▶️ Run Offline Metrics** to evaluate the annotated dataset.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 5 — GUARDRAILS
+# ─────────────────────────────────────────────────────────────────────────────
+# LEARNING: This tab shows the guardrail report for the last pipeline run.
+#
+# Input guardrails run BEFORE any LLM call:
+#   - EmptyInputGuardrail  — block blank / too-short / gibberish text
+#   - PromptInjectionGuardrail — block adversarial injection attempts
+#   - PIIGuardrail — warn when PII is present in the raw transcript
+#
+# Output guardrails run AFTER all agents complete:
+#   - PIILeakageGuardrail — warn if PII leaked into the generated summary
+#   - CompletenessGuardrail — warn if summary / key_points / action_items missing
+#
+# Severity levels:
+#   🔴 high   — pipeline was blocked (or should be reviewed immediately)
+#   🟡 medium — pipeline continued but operator should review
+#   🟢 low    — informational, no action required
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_guardrails:
+    st.subheader("🛡️ Guardrail Report")
+
+    result = st.session_state.result
+
+    if result is None:
+        st.info("No results yet. Process a call in the **Upload & Process** tab first.")
+    else:
+        violations = result.get("guardrail_violations") or []
+        blocked    = result.get("guardrail_blocked", False)
+
+        # ── Overall status banner ──────────────────────────────────────────
+        if blocked:
+            st.error("🔴 **BLOCKED** — Input guardrail halted the pipeline before any LLM call was made.")
+        elif violations:
+            st.warning(f"🟡 **{len(violations)} violation(s) flagged** — Pipeline completed but guardrails detected issues.")
+        else:
+            st.success("🟢 **All guardrails passed** — No violations detected.")
+
+        st.divider()
+
+        # ── Violation detail cards ─────────────────────────────────────────
+        if violations:
+            st.subheader("Violations")
+            SEVERITY_ICON = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+
+            # Re-run guardrails live so we get structured violation objects
+            # (session_state only stores serialised strings from CallRecord)
+            try:
+                from guardrails.runner import run_input_guardrails, run_output_guardrails
+                from agents.schemas import CallRecord
+
+                transcript = result.get("raw_transcript") or ""
+                input_result = run_input_guardrails(transcript)
+
+                # Reconstruct a minimal CallRecord for output guardrails
+                mock_record = CallRecord(
+                    call_id=result.get("call_id", "unknown"),
+                    input_type=result.get("input_type", "json_transcript"),
+                    summary=result.get("summary"),
+                    key_points=result.get("key_points"),
+                    action_items=result.get("action_items"),
+                )
+                output_result = run_output_guardrails(mock_record)
+
+                all_violations = (
+                    [("Input", v) for v in input_result.violations]
+                    + [("Output", v) for v in output_result.violations]
+                )
+
+                if all_violations:
+                    for stage, v in all_violations:
+                        icon = SEVERITY_ICON.get(v.severity, "⚪")
+                        with st.container(border=True):
+                            col_icon, col_body = st.columns([0.08, 0.92])
+                            col_icon.markdown(f"## {icon}")
+                            with col_body:
+                                st.markdown(f"**[{stage}] `{v.code}`** — {v.severity.upper()}")
+                                st.caption(v.message)
+                else:
+                    # Violations were stored as strings — display them directly
+                    for msg in violations:
+                        st.markdown(f"- {msg}")
+
+            except Exception as exc:
+                # Fallback: just display the stored strings
+                for msg in violations:
+                    st.markdown(f"- ⚠️ {msg}")
+                st.caption(f"_(Could not re-run guardrails for structured display: {exc})_")
+
+        else:
+            st.markdown("No violations to display.")
+
+        st.divider()
+
+        # ── Educational explainer ──────────────────────────────────────────
+        with st.expander("📚 How guardrails work in this pipeline", expanded=False):
+            st.markdown("""
+**Pipeline flow with guardrails:**
+
+```
+[user input]
+     │
+     ▼
+┌─────────────────────────┐
+│  INPUT GUARDRAILS       │  ← runs before any LLM call
+│  1. EmptyInput          │    EMPTY_INPUT / TOO_SHORT / GIBBERISH
+│  2. PromptInjection     │    PROMPT_INJECTION  (blocks on HIGH)
+│  3. PII detection       │    PII_PHONE / PII_EMAIL / PII_SSN / PII_CC
+└─────────────────────────┘
+     │ pass         │ block (high severity)
+     ▼              ▼ → END (CallRecord.guardrail_blocked=True)
+┌─────────────────────────┐
+│  PIPELINE AGENTS        │
+│  IntakeAgent            │
+│  TranscriptionAgent     │
+│  SummarizationAgent     │
+│  QAScoringAgent         │
+└─────────────────────────┘
+     │
+     ▼
+┌─────────────────────────┐
+│  OUTPUT GUARDRAILS      │  ← runs after all agents complete
+│  1. PIILeakage          │    checks summary / key_points / action_items
+│  2. Completeness        │    ensures summary + key_points are non-empty
+└─────────────────────────┘
+     │
+     ▼
+  [result]
+```
+
+**Severity levels:**
+| Level | Colour | Action |
+|-------|--------|--------|
+| `high` | 🔴 | Block pipeline (input) or flag for immediate review (output) |
+| `medium` | 🟡 | Warn — pipeline continues, operator should review |
+| `low` | 🟢 | Informational — no action required |
+            """)
