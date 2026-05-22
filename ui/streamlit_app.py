@@ -135,7 +135,7 @@ st.divider()
 # This means: never put an expensive computation directly inside a tab body.
 # Always guard with `if st.session_state.result is not None`.
 # ═════════════════════════════════════════════════════════════════════════════
-tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails, tab_history, tab_supervisor = st.tabs([
+tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails, tab_history, tab_supervisor, tab_crew = st.tabs([
     "📤  Upload & Process",
     "📋  Review Results",
     "📊  Analytics",
@@ -143,6 +143,7 @@ tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails, tab_history, ta
     "🛡️  Guardrails",
     "📚  History",
     "🤖  Supervisor",
+    "👥  CrewAI",
 ])
 
 
@@ -1260,5 +1261,97 @@ The SupervisorAgent queries the call center pipeline's output through
 a defined tool interface — it doesn't know how calls are processed,
 only how to ask for results. Two agents, one interface.
         """)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 8 — CREWAI QA REVIEW
+# ─────────────────────────────────────────────────────────────────────────────
+# LEARNING: CrewAI runs a three-agent pipeline where each agent has a
+# specialised role. Unlike the Supervisor (one agent, open-ended loop),
+# the Crew follows a structured sequence:
+#   Analyst → QA Reviewer → Report Writer
+# Each agent's output becomes the next agent's context.
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_crew:
+    st.subheader("👥 CrewAI — QA Review Crew")
+    st.caption(
+        "Runs a three-agent crew: **Analyst** gathers data → "
+        "**QA Reviewer** evaluates quality → **Report Writer** produces a report."
+    )
+
+    with st.expander("📚 How the Crew works", expanded=False):
+        st.markdown("""
+**Three agents, sequential pipeline:**
+
+```
+┌──────────────────────────────────┐
+│  Agent 1: Call Analyst           │  Uses tools to pull call data
+│  Tools: search, details, stats   │  from SQLite
+└──────────────────┬───────────────┘
+                   │ output (data summary)
+                   ▼
+┌──────────────────────────────────┐
+│  Agent 2: QA Reviewer            │  Evaluates quality patterns,
+│  Tools: none (uses context)      │  scores, flags issues
+└──────────────────┬───────────────┘
+                   │ output (quality assessment)
+                   ▼
+┌──────────────────────────────────┐
+│  Agent 3: Report Writer          │  Formats everything into
+│  Tools: none (uses context)      │  an executive markdown report
+└──────────────────────────────────┘
+```
+
+**CrewAI vs Supervisor (A2A):**
+| | Supervisor | CrewAI Crew |
+|---|---|---|
+| Agents | 1 | 3 |
+| Structure | Open loop | Fixed pipeline |
+| Best for | Ad-hoc queries | Structured reports |
+| Output | Conversational | Formatted document |
+        """)
+
+    st.divider()
+
+    focus = st.text_input(
+        label="Review focus",
+        placeholder="e.g. billing complaints, escalated calls, overall performance",
+        value="overall performance",
+        key="crew_focus",
+    )
+
+    if st.button("▶️ Run QA Crew", type="primary", disabled=not (focus or "").strip()):
+        with st.status("👥 Crew working...", expanded=True) as crew_status:
+            st.write("🔍 Agent 1 (Analyst) — retrieving call data...")
+            st.write("📋 Agent 2 (QA Reviewer) — evaluating quality...")
+            st.write("✍️  Agent 3 (Report Writer) — writing report...")
+            try:
+                from crew.qa_crew import run_qa_crew
+                report = run_qa_crew(focus=focus.strip())
+                st.session_state["crew_report"] = report
+                st.session_state["crew_focus_text"] = focus.strip()
+                crew_status.update(label="✅ Report ready!", state="complete")
+            except Exception as exc:
+                crew_status.update(label=f"❌ Crew failed: {exc}", state="error")
+                st.error(f"**Error:** {exc}")
+
+    report = st.session_state.get("crew_report")
+    if report:
+        st.divider()
+        focus_text = st.session_state.get("crew_focus_text", "")
+        if focus_text:
+            st.caption(f"Review focus: *{focus_text}*")
+        st.markdown(report)
+
+        col_dl, _ = st.columns([1, 3])
+        with col_dl:
+            st.download_button(
+                label="⬇️ Download Report",
+                data=report,
+                file_name=f"qa_report_{focus_text.replace(' ', '_')}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+
 
 
