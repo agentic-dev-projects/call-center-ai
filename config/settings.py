@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     RAG_MMR_LAMBDA: float = 0.7     # MMR diversity weight: 1.0=pure relevance, 0.0=pure diversity
     SUMMARIZATION_TEMPERATURE: float = 0.3
 
-    # ── Semantic cache ───────────────────────────────────────────────────────
+    # ── Database (SQLite) ────────────────────────────────────────────────────
+    SQLITE_DB_PATH: str = "./data/calls.db"  # override with /data/calls.db on HF Spaces
     CACHE_SIMILARITY_THRESHOLD: float = 0.85
     CHROMA_PERSIST_DIR: str = "./chroma_cache"
 

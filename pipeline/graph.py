@@ -15,6 +15,7 @@ from agents.tool_agent import ToolAgent
 
 from guardrails.runner import run_input_guardrails, run_output_guardrails
 from agents.schemas import CallStatus
+from db.sqlite_store import save_call
 
 from ops.tracing import setup_langsmith
 from ops.agentops_tracker import setup_agentops, AgentOpsSession
@@ -86,6 +87,26 @@ def output_guard_node(state: PipelineState):
     return {"record": record}
 
 
+def persist_node(state: PipelineState):
+    """
+    Persist the completed CallRecord to SQLite.
+
+    LEARNING: Separating persistence into its own graph node means:
+      - Every exit path through the graph hits this node
+      - The pipeline logic (agents) stays decoupled from storage
+      - You can swap SQLite → Postgres by changing only sqlite_store.py
+
+    This node runs last, after output_guard, so the full record
+    (including guardrail violations) is saved in one write.
+    """
+    record = state["record"]
+    try:
+        save_call(record)
+    except Exception as exc:
+        logger.warning(f"SQLite: failed to save call {record.call_id} — {exc}")
+    return {"record": record}
+
+
 def intake_node(state: PipelineState):
     record = intake.run(state["record"])
     return {"record": record}
@@ -134,6 +155,7 @@ def build_graph():
     graph.add_node("escalate", escalate_node)
     graph.add_node("tool", tool_node)
     graph.add_node("output_guard", output_guard_node)
+    graph.add_node("persist", persist_node)
 
     def router_node(state: PipelineState):
         next_step = router.run(state["record"])
@@ -151,14 +173,14 @@ def build_graph():
     graph.set_entry_point("intake")
     graph.add_edge("intake", "input_guard")
 
-    # If blocked, go straight to END; otherwise continue to routing
+    # If blocked, save to DB then END; otherwise continue to routing
     def after_input_guard(state: PipelineState):
         return "end" if state["record"].guardrail_blocked else "continue"
 
     graph.add_conditional_edges(
         "input_guard",
         after_input_guard,
-        {"end": END, "continue": "router"},
+        {"end": "persist", "continue": "router"},   # blocked calls still persisted
     )
 
     graph.add_conditional_edges(
@@ -170,7 +192,7 @@ def build_graph():
             "qa": "qa",
             "escalate": "escalate",
             "tool": "tool",
-            "end": "output_guard",   # pipeline complete → output guardrail
+            "end": "output_guard",
         }
     )
 
@@ -180,7 +202,8 @@ def build_graph():
     graph.add_edge("qa", "tool")
     graph.add_edge("tool", "router")
     graph.add_edge("escalate", "output_guard")
-    graph.add_edge("output_guard", END)
+    graph.add_edge("output_guard", "persist")
+    graph.add_edge("persist", END)
 
     return graph.compile()
 

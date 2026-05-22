@@ -135,12 +135,13 @@ st.divider()
 # This means: never put an expensive computation directly inside a tab body.
 # Always guard with `if st.session_state.result is not None`.
 # ═════════════════════════════════════════════════════════════════════════════
-tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails = st.tabs([
+tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails, tab_history = st.tabs([
     "📤  Upload & Process",
     "📋  Review Results",
     "📊  Analytics",
     "🧪  Evaluation",
     "🛡️  Guardrails",
+    "📚  History",
 ])
 
 
@@ -1059,3 +1060,102 @@ with tab_guardrails:
 | `medium` | 🟡 | Warn — pipeline continues, operator should review |
 | `low` | 🟢 | Informational — no action required |
             """)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 6 — HISTORY
+# ─────────────────────────────────────────────────────────────────────────────
+# LEARNING: This tab queries SQLite directly — it shows ALL past calls,
+# not just the one in session_state. This is the value of persistence:
+# even after a page refresh or app restart, history survives.
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_history:
+    st.subheader("📚 Call History")
+
+    from db.sqlite_store import get_all_calls, get_call_count, delete_call
+
+    total = get_call_count()
+    st.caption(f"{total} call(s) stored in SQLite — `{settings.SQLITE_DB_PATH}`")
+
+    col_refresh, col_spacer = st.columns([1, 4])
+    with col_refresh:
+        if st.button("🔄 Refresh", use_container_width=True):
+            st.rerun()
+
+    st.divider()
+
+    calls = get_all_calls(limit=50)
+
+    if not calls:
+        st.info("No calls stored yet. Process a call in the **Upload & Process** tab first.")
+    else:
+        # ── Summary table ──────────────────────────────────────────────────
+        import pandas as pd
+
+        table_data = []
+        for c in calls:
+            qa = c.get("qa_scores") or {}
+            overall = qa.get("overall_score")
+            violations = c.get("guardrail_violations") or []
+            table_data.append({
+                "Call ID":   (c.get("call_id") or "")[:12],
+                "Status":    (c.get("status") or "").upper(),
+                "QA Score":  f"{overall:.1f}" if overall else "—",
+                "Cache":     "✅" if c.get("from_cache") else "—",
+                "Guardrails": f"⚠️ {len(violations)}" if violations else "✅",
+                "Blocked":   "🔴" if c.get("guardrail_blocked") else "—",
+                "Saved At":  (c.get("updated_at") or "")[:19].replace("T", " "),
+            })
+
+        df = pd.DataFrame(table_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # ── Per-call detail expanders ──────────────────────────────────────
+        st.subheader("Call Details")
+        for c in calls:
+            call_id  = c.get("call_id", "unknown")
+            status   = (c.get("status") or "").upper()
+            saved_at = (c.get("updated_at") or "")[:19].replace("T", " ")
+
+            with st.expander(f"`{call_id[:12]}` — {status} — {saved_at}"):
+
+                left, right = st.columns([1, 1], gap="large")
+
+                with left:
+                    st.markdown("**Summary**")
+                    st.write(c.get("summary") or "_No summary._")
+
+                    st.markdown("**Key Points**")
+                    for kp in (c.get("key_points") or []):
+                        st.markdown(f"- {kp}")
+
+                with right:
+                    st.markdown("**Action Items**")
+                    for ai in (c.get("action_items") or []):
+                        st.markdown(f"- {ai}")
+
+                    qa = c.get("qa_scores") or {}
+                    if qa:
+                        st.markdown("**QA Scores**")
+                        overall = qa.get("overall_score")
+                        if overall:
+                            st.metric("Overall", f"{overall:.2f} / 5.0")
+
+                violations = c.get("guardrail_violations") or []
+                if violations:
+                    st.warning(f"⚠️ {len(violations)} guardrail violation(s)")
+                    for v in violations:
+                        st.caption(f"• {v}")
+
+                if c.get("error"):
+                    st.error(f"Error: {c['error']}")
+
+                # Delete button
+                st.divider()
+                if st.button(f"🗑️ Delete this call", key=f"del_{call_id}"):
+                    delete_call(call_id)
+                    st.success(f"Deleted `{call_id[:12]}`")
+                    st.rerun()
+
