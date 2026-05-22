@@ -135,13 +135,14 @@ st.divider()
 # This means: never put an expensive computation directly inside a tab body.
 # Always guard with `if st.session_state.result is not None`.
 # ═════════════════════════════════════════════════════════════════════════════
-tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails, tab_history = st.tabs([
+tab_upload, tab_review, tab_analytics, tab_eval, tab_guardrails, tab_history, tab_supervisor = st.tabs([
     "📤  Upload & Process",
     "📋  Review Results",
     "📊  Analytics",
     "🧪  Evaluation",
     "🛡️  Guardrails",
     "📚  History",
+    "🤖  Supervisor",
 ])
 
 
@@ -1073,6 +1074,7 @@ with tab_history:
     st.subheader("📚 Call History")
 
     from db.sqlite_store import get_all_calls, get_call_count, delete_call
+    from config.settings import settings
 
     total = get_call_count()
     st.caption(f"{total} call(s) stored in SQLite — `{settings.SQLITE_DB_PATH}`")
@@ -1158,4 +1160,105 @@ with tab_history:
                     delete_call(call_id)
                     st.success(f"Deleted `{call_id[:12]}`")
                     st.rerun()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 7 — SUPERVISOR (A2A)
+# ─────────────────────────────────────────────────────────────────────────────
+# LEARNING: The Supervisor tab is the A2A interface.
+# Instead of clicking through the UI to find call data, you ask a question
+# in plain English. The SupervisorAgent uses tool calling to query SQLite,
+# reason about the results, and give a direct answer.
+#
+# This is A2A because the SupervisorAgent (one agent) is querying the
+# call center pipeline's data (another agent system) through a defined
+# tool interface — neither knows the other's internals.
+# ═════════════════════════════════════════════════════════════════════════════
+with tab_supervisor:
+    st.subheader("🤖 Supervisor — Ask About Your Calls")
+    st.caption(
+        "Ask any question about your call center data in plain English. "
+        "The Supervisor uses AI tool-calling to search, analyse, and report."
+    )
+
+    # ── Example queries ───────────────────────────────────────────────────
+    with st.expander("💡 Example questions", expanded=False):
+        st.markdown("""
+- *How is the call center performing overall?*
+- *Find all calls related to billing issues.*
+- *Were there any escalated calls? What were the issues?*
+- *Is there a known outage in California?*
+- *What was the average QA score across all calls?*
+- *Show me calls that were blocked by guardrails.*
+        """)
+
+    st.divider()
+
+    # ── Query input ───────────────────────────────────────────────────────
+    query = st.text_area(
+        label="supervisor_query",
+        placeholder="e.g. How many calls were about billing issues and what was their average QA score?",
+        height=80,
+        label_visibility="collapsed",
+        key="supervisor_query",
+    )
+
+    if st.button("▶️ Ask Supervisor", type="primary", disabled=not (query or "").strip()):
+        with st.spinner("🤖 Supervisor is analysing..."):
+            try:
+                from agents.supervisor_agent import SupervisorAgent
+                supervisor = SupervisorAgent()
+                answer = supervisor.run(query.strip())
+                st.session_state["supervisor_answer"] = answer
+                st.session_state["supervisor_query_text"] = query.strip()
+            except Exception as exc:
+                st.error(f"Supervisor error: {exc}")
+
+    # ── Display answer ────────────────────────────────────────────────────
+    answer = st.session_state.get("supervisor_answer")
+    if answer:
+        st.divider()
+        q_text = st.session_state.get("supervisor_query_text", "")
+        if q_text:
+            st.caption(f"Q: *{q_text}*")
+        st.markdown(answer)
+
+    # ── How it works expander ─────────────────────────────────────────────
+    st.divider()
+    with st.expander("📚 How the Supervisor works (A2A explained)", expanded=False):
+        st.markdown("""
+**The ReAct tool-calling loop:**
+
+```
+You ask: "Find all billing calls and their QA scores"
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  SupervisorAgent sends to LLM:          │
+│   - your question                       │
+│   - list of available tools             │
+└─────────────────────────────────────────┘
+         │
+         ▼  LLM decides: "I should search for billing calls"
+┌─────────────────────────────────────────┐
+│  Tool call: search_call_history("billing") │
+│  → queries SQLite, returns matches      │
+└─────────────────────────────────────────┘
+         │
+         ▼  LLM decides: "I need details on call abc123"
+┌─────────────────────────────────────────┐
+│  Tool call: get_call_details("abc123")  │
+│  → returns summary, QA scores           │
+└─────────────────────────────────────────┘
+         │
+         ▼  LLM has enough info → writes final answer
+"Found 2 billing calls. Average QA score: 4.1/5.0 ..."
+```
+
+**Why this is A2A:**
+The SupervisorAgent queries the call center pipeline's output through
+a defined tool interface — it doesn't know how calls are processed,
+only how to ask for results. Two agents, one interface.
+        """)
+
 
