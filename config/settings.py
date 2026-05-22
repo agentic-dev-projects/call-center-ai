@@ -19,7 +19,9 @@ class Settings(BaseSettings):
 
     # ── RAG ──────────────────────────────────────────────────────────────────
     CHUNK_MAX_LINES: int = 4        # sentences per chunk
-    RAG_TOP_K: int = 3              # chunks retrieved per query
+    CHUNK_OVERLAP: int = 1          # sentences shared between adjacent chunks (M18)
+    RAG_TOP_K: int = 3              # chunks returned after MMR re-ranking
+    RAG_MMR_LAMBDA: float = 0.7     # MMR diversity weight: 1.0=pure relevance, 0.0=pure diversity
     SUMMARIZATION_TEMPERATURE: float = 0.3
 
     # ── Semantic cache ───────────────────────────────────────────────────────

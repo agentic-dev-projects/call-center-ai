@@ -11,9 +11,9 @@ from agents.schemas import CallRecord, CallStatus
 from config.settings import settings
 from openai import OpenAI
 
-from rag.chunker import chunk_transcript
+from rag.chunker import chunk_by_speaker
 from rag.vector_store import store_chunks
-from rag.retriever import retrieve
+from rag.hybrid_retriever import hybrid_retrieve
 
 from utils.logger import logger
 
@@ -30,7 +30,6 @@ class SummarizationAgent(BaseAgent):
         if not record.raw_transcript:
             raise ValueError("Transcript missing")
 
-
         # Check cache first
         query = " ".join(record.raw_transcript.strip().lower().split())
         cached = get_from_cache(query)
@@ -43,38 +42,37 @@ class SummarizationAgent(BaseAgent):
             record.status = CallStatus.SUMMARIZED
             record.from_cache = True
             return record
-        
+
         # ----------------------------
-        # RAG PIPELINE
+        # ADVANCED RAG PIPELINE (M18)
         # ----------------------------
 
-        # Step 1: chunk transcript
-        chunks = chunk_transcript(record.raw_transcript)
+        # Step 1: speaker-turn aware overlap chunking
+        chunks = chunk_by_speaker(record.raw_transcript)
+        logger.info(f"Chunked transcript into {len(chunks)} chunk(s)")
 
         # Step 2: store chunks in vector DB
         store_chunks(record.call_id, chunks)
 
-        # Step 3: retrieve relevant chunks
-        relevant_chunks = retrieve(record.raw_transcript)
+        # Step 3: hybrid retrieve (dense + BM25 → RRF → MMR)
+        relevant_chunks = hybrid_retrieve(record.raw_transcript, chunks)
 
-        # Combine retrieved chunks
         if not relevant_chunks:
             logger.warning("No relevant chunks found, using full transcript")
             context = record.raw_transcript
         else:
             context = "\n".join(relevant_chunks)
 
-        # ADD DEBUG PRINT HERE
-        logger.info(f"Retrieved context: {context}")
+        logger.info(f"Retrieved {len(relevant_chunks)} chunk(s) for context")
 
         # Load prompt
         with open(f"{settings.PROMPTS_DIR}/summarization_v1.txt", "r") as f:
             prompt_template = f.read()
-        
+
         formatted_template = prompt_template.format(
             transcript=record.raw_transcript
         )
-        
+
         prompt = f"""
         Context:
         {context}
@@ -99,20 +97,16 @@ class SummarizationAgent(BaseAgent):
 
         content = response.choices[0].message.content
 
-        # Try parsing JSON output
         try:
             parsed = json.loads(content)
         except Exception:
             raise ValueError("Failed to parse LLM output as JSON")
 
-        # Update record
         record.summary = parsed.get("summary")
         record.key_points = parsed.get("key_points")
         record.action_items = parsed.get("action_items")
-
         record.status = CallStatus.SUMMARIZED
 
-        # Store result in cache
         logger.info("Storing response in cache")
         store_in_cache(query, {
             "summary": record.summary,
