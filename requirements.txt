@@ -16,3 +16,4 @@ ragas
 datasets
 agentops==0.3.21
 rank-bm25
+mcp
